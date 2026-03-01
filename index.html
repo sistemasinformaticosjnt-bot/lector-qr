@@ -23,44 +23,60 @@
         <p>Último QR: <b id="last-qr">Ninguno</b></p>
     </div>
 
-    <script>
-        const scriptURL = 'https://script.google.com/macros/s/AKfycbzEQQkp8GzLrVnSPST8lwb8JrAIup97Cjmo1JsTyedCDY_1Jvcu6lgEIfYwovR_lhMK/exec'; // <--- ASEGÚRATE QUE SEA LA NUEVA VERSIÓN
+     <script>
+    const scriptURL = 'https://script.google.com/macros/s/AKfycbzEQQkp8GzLrVnSPST8lwb8JrAIup97Cjmo1JsTyedCDY_1Jvcu6lgEIfYwovR_lhMK/exec'; 
+    
+    // 1. Configurar el sonido (puedes cambiar esta URL por cualquier mp3 corto)
+    const beepSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
+    
+    // Variable para controlar la pausa de 1 segundo
+    let isProcessing = false;
 
-        function onScanSuccess(decodedText) {
-            document.getElementById('last-qr').innerText = decodedText;
-            document.getElementById('status').innerText = "Enviando a Sheets...";
+    function onScanSuccess(decodedText) {
+        // 2. Si ya estamos procesando un código, ignoramos los nuevos escaneos
+        if (isProcessing) return;
+
+        isProcessing = true; // Bloqueamos nuevas lecturas
+        
+        // 3. Emitir sonido y vibración
+        beepSound.play();
+        if (navigator.vibrate) navigator.vibrate(100);
+
+        document.getElementById('last-qr').innerText = decodedText;
+        document.getElementById('status').innerText = "Enviando...";
+
+        fetch(scriptURL, {
+            method: 'POST',
+            mode: 'no-cors',
+            cache: 'no-cache',
+            body: JSON.stringify({ codigo: decodedText })
+        })
+        .then(() => {
+            document.getElementById('status').innerText = "¡Guardado! Esperando...";
             
-            // Sonido de confirmación o vibración (opcional)
-            if (navigator.vibrate) navigator.vibrate(100);
-
-            fetch(scriptURL, {
-                method: 'POST',
-                mode: 'no-cors',
-                cache: 'no-cache',
-                body: JSON.stringify({ codigo: decodedText })
-            })
-            .then(() => {
-                document.getElementById('status').innerText = "¡Enviado con éxito!";
-                // Esperar 3 segundos antes de permitir el siguiente escaneo si lo deseas
-            })
-            .catch(err => {
-                document.getElementById('status').innerText = "Error de red";
-                console.error(err);
-            });
-        }
-
-        // Configuración del escáner
-        const html5QrCode = new Html5Qrcode("reader");
-        const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
-        // Iniciar con la cámara trasera automáticamente
-        html5QrCode.start(
-            { facingMode: "environment" }, // Fuerza el uso de la cámara trasera
-            config,
-            onScanSuccess
-        ).catch(err => {
-            document.getElementById('status').innerText = "Error: " + err;
+            // 4. Esperar 1 segundo antes de permitir la siguiente lectura
+            setTimeout(() => {
+                isProcessing = false;
+                document.getElementById('status').innerText = "Listo para escanear";
+            }, 1000); 
+        })
+        .catch(err => {
+            document.getElementById('status').innerText = "Error de red";
+            isProcessing = false; // Desbloqueamos en caso de error para reintentar
         });
+    }
+
+    const html5QrCode = new Html5Qrcode("reader");
+    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
+
+    html5QrCode.start(
+        { facingMode: "environment" }, 
+        config,
+        onScanSuccess
+    ).catch(err => {
+        document.getElementById('status').innerText = "Error: " + err;
+    });
     </script>
 </body>
 </html>
+
