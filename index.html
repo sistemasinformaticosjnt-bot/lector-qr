@@ -3,185 +3,132 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Scanner Ultra-Fast</title>
+    <title>Scanner Ultra-Fast v2</title>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root {
-            --bg-color: #f4f7f6;
-            --primary: #007bff;
-        }
-        body { 
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
-            text-align: center; 
-            margin: 0; 
-            padding: 20px; 
-            background: var(--bg-color); 
-            transition: background 0.1s ease;
-            overscroll-behavior: none;
-        }
-        #reader { 
-            width: 100%; 
-            max-width: 500px; 
-            margin: 0 auto; 
-            border-radius: 20px; 
-            overflow: hidden; 
-            box-shadow: 0 10px 25px rgba(0,0,0,0.15);
-            background: black;
-        }
-        .container {
-            max-width: 500px;
-            margin: auto;
-        }
-        .stats {
-            display: flex;
-            justify-content: space-around;
-            margin-top: 20px;
-            background: white;
-            padding: 15px;
-            border-radius: 15px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.05);
-        }
-        .stat-item { flex: 1; }
-        .label { display: block; font-size: 0.8rem; color: #666; text-transform: uppercase; }
-        .value { font-size: 1.1rem; font-weight: bold; color: #333; }
-        #status { color: var(--primary); }
-        .hint { font-size: 0.8rem; color: #888; margin-top: 10px; }
+        body { font-family: sans-serif; text-align: center; margin: 0; padding: 20px; background: #f4f7f6; transition: background 0.1s; }
+        #reader { width: 100%; max-width: 400px; margin: auto; border-radius: 15px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.2); }
+        .controls { margin: 20px 0; padding: 15px; background: white; border-radius: 12px; }
+        #btn-audio { padding: 10px 20px; font-size: 1rem; cursor: pointer; background: #28a745; color: white; border: none; border-radius: 5px; margin-bottom: 10px; }
+        .status-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+        .box { background: #eee; padding: 10px; border-radius: 8px; font-size: 0.9rem; }
+        .value { display: block; font-weight: bold; font-size: 1.1rem; }
     </style>
 </head>
-<body onclick="iniciarAudio()">
+<body>
 
-    <div class="container">
-        <h2>Scanner QR Pro</h2>
-        
-        <div id="reader"></div>
-        
-        <p class="hint">Toca la pantalla una vez para activar el sonido</p>
+    <h2>Scanner QR Profesional</h2>
+    
+    <div id="reader"></div>
 
-        <div class="stats">
-            <div class="stat-item">
-                <span class="label">Último QR</span>
-                <span id="last-qr" class="value">-</span>
-            </div>
-            <div class="stat-item">
-                <span class="label">Estado</span>
-                <span id="status" class="value">Iniciando...</span>
-            </div>
+    <div class="controls">
+        <button id="btn-audio">🔊 Activar Sonido y Cámara</button>
+        
+        <div class="status-grid">
+            <div class="box">Último: <span id="last-qr" class="value">-</span></div>
+            <div class="box">Cola: <span id="q-size" class="value">0</span></div>
         </div>
+        <p id="status" style="color: blue; margin-top: 10px;">Esperando activación...</p>
     </div>
 
     <script>
-        // --- CONFIGURACIÓN ---
         const scriptURL = 'https://script.google.com/macros/s/AKfycbzEQQkp8GzLrVnSPST8lwb8JrAIup97Cjmo1JsTyedCDY_1Jvcu6lgEIfYwovR_lhMK/exec'; 
-        const TIEMPO_BLOQUEO = 250; // Un cuarto de segundo
         
-        // Sonido de alta frecuencia y volumen forzado
-        const beepSound = new Audio('https://raw.githubusercontent.com/rafaelwp-sc/f-droid/master/app/src/main/res/raw/beep.mp3');
-        beepSound.volume = 1.0;
-
-        // Variables de control
         let colaDeEnvio = [];
         let enviando = false;
-        let bloqueadoPorTiempo = false;
-        let ultimoCodigo = "";
-        let audioActivado = false;
+        let ultimoCodigoGlobal = "";
+        let tiempoUltimoEscaneo = 0;
+        let audioContext = null;
 
-        // Desbloquea el audio en móviles (requiere interacción del usuario)
-        function iniciarAudio() {
-            if (!audioActivado) {
-                beepSound.play().then(() => {
-                    beepSound.pause();
-                    beepSound.currentTime = 0;
-                    audioActivado = true;
-                    console.log("Audio activado correctamente");
-                }).catch(e => console.log("Esperando interacción..."));
-            }
+        // Función para generar un "Beep" sintético (más confiable que un MP3)
+        function playBeep() {
+            if (!audioContext) return;
+            const osc = audioContext.createOscillator();
+            const gain = audioContext.createGain();
+            osc.type = "sine";
+            osc.frequency.value = 880; // Tono agudo
+            gain.gain.value = 0.5;
+            osc.connect(gain);
+            gain.connect(audioContext.destination);
+            osc.start();
+            gain.gain.exponentialRampToValueAtTime(0.00001, audioContext.currentTime + 0.1);
+            osc.stop(audioContext.currentTime + 0.1);
         }
 
-        function onScanSuccess(decodedText) {
-            // Validar si el escáner está listo para otro registro
-            if (bloqueadoPorTiempo || (decodedText === ultimoCodigo)) return;
-
-            // 1. Feedback inmediato (Sonido, Vibración, Visual)
-            if (audioActivado) {
-                beepSound.currentTime = 0;
-                beepSound.play();
+        // Activar audio y cámara al pulsar el botón
+        document.getElementById('btn-audio').addEventListener('click', function() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
             }
-            
-            if (navigator.vibrate) navigator.vibrate([200, 50, 200]);
-            
-            // Parpadeo verde
-            document.body.style.backgroundColor = "#90ee90";
-            setTimeout(() => { document.body.style.backgroundColor = "#f4f7f6"; }, 150);
+            this.style.display = 'none'; // Ocultar botón tras activar
+            iniciarEscaner();
+        });
 
-            // 2. Actualizar UI
+        function onScanSuccess(decodedText) {
+            const ahora = Date.now();
+            
+            // Lógica Anti-Duplicados:
+            // 1. Si es el mismo código que el anterior Y han pasado menos de 3 segundos, ignorar.
+            if (decodedText === ultimoCodigoGlobal && (ahora - tiempoUltimoEscaneo) < 3000) {
+                return; 
+            }
+
+            // Registrar escaneo exitoso
+            ultimoCodigoGlobal = decodedText;
+            tiempoUltimoEscaneo = ahora;
+
+            // Feedback
+            playBeep();
+            if (navigator.vibrate) navigator.vibrate([100, 50, 100]);
+            document.body.style.backgroundColor = "#d4edda";
+            setTimeout(() => document.body.style.backgroundColor = "#f4f7f6", 150);
+
             document.getElementById('last-qr').innerText = decodedText;
             
-            // 3. Gestionar Cola y Bloqueo
+            // Añadir a cola
             colaDeEnvio.push(decodedText);
-            bloqueadoPorTiempo = true;
-            ultimoCodigo = decodedText;
-
-            // Liberar escáner rápido
-            setTimeout(() => { 
-                bloqueadoPorTiempo = false; 
-                ultimoCodigo = ""; 
-            }, TIEMPO_BLOQUEO);
-
-            // 4. Procesar envío en segundo plano
+            actualizarUI();
             procesarCola();
         }
 
         async function procesarCola() {
             if (enviando || colaDeEnvio.length === 0) return;
-
             enviando = true;
-            const codigoActual = colaDeEnvio[0];
-            document.getElementById('status').innerText = `Enviando (${colaDeEnvio.length})...`;
+
+            const dato = colaDeEnvio[0];
+            document.getElementById('status').innerText = "Enviando...";
 
             try {
-                // El modo 'no-cors' es necesario para Google Apps Script
                 await fetch(scriptURL, {
                     method: 'POST',
                     mode: 'no-cors',
-                    cache: 'no-cache',
-                    body: JSON.stringify({ codigo: codigoActual })
+                    body: JSON.stringify({ codigo: dato })
                 });
-                
-                // Éxito: quitar de la cola
-                colaDeEnvio.shift();
-                document.getElementById('status').innerText = colaDeEnvio.length > 0 ? "Enviando..." : "Listo";
-            } catch (err) {
-                document.getElementById('status').innerText = "Error de Red";
-                console.error("Error al enviar:", err);
-                // Si falla, esperamos 2 segundos para no saturar y reintentamos
-                await new Promise(resolve => setTimeout(resolve, 2000));
+                colaDeEnvio.shift(); // Eliminar de la cola si se envió
+                document.getElementById('status').innerText = "Listo";
+            } catch (e) {
+                document.getElementById('status').innerText = "Error de conexión";
             }
 
             enviando = false;
-            if (colaDeEnvio.length > 0) procesarCola();
+            actualizarUI();
+            if (colaDeEnvio.length > 0) setTimeout(procesarCola, 500);
         }
 
-        // Iniciar cámara trasera
-        const html5QrCode = new Html5Qrcode("reader");
-        const config = { 
-            fps: 20, // Más frames para lectura más rápida
-            qrbox: { width: 250, height: 250 },
-            aspectRatio: 1.0
-        };
+        function actualizarUI() {
+            document.getElementById('q-size').innerText = colaDeEnvio.length;
+        }
 
-        html5QrCode.start(
-            { facingMode: "environment" }, 
-            config,
-            onScanSuccess
-        ).catch(err => {
-            document.getElementById('status').innerText = "Error Cámara";
-            console.error(err);
-        });
+        function iniciarEscaner() {
+            const html5QrCode = new Html5Qrcode("reader");
+            html5QrCode.start(
+                { facingMode: "environment" }, 
+                { fps: 20, qrbox: 250 },
+                onScanSuccess
+            ).catch(err => {
+                document.getElementById('status').innerText = "Error de cámara";
+            });
+        }
     </script>
 </body>
 </html>
-
-
-
-
-
