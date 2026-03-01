@@ -13,8 +13,8 @@
     </style>
 </head>
 <body>
- <h2>EDUSCAN</h2>
-    <h2>Sistema de Control de Asistencia para Unidades Educativas</h2>
+
+    <h2>Escáner a Google Sheets</h2>
     
     <div id="reader"></div>
 
@@ -23,62 +23,85 @@
         <p>Último QR: <b id="last-qr">Ninguno</b></p>
     </div>
 
-     <script>
+     
+
+    <script>
     const scriptURL = 'https://script.google.com/macros/s/AKfycbzEQQkp8GzLrVnSPST8lwb8JrAIup97Cjmo1JsTyedCDY_1Jvcu6lgEIfYwovR_lhMK/exec'; 
-    
-    // 1. Configurar el sonido (puedes cambiar esta URL por cualquier mp3 corto)
     const beepSound = new Audio('https://assets.mixkit.co/active_storage/sfx/2568/2568-preview.mp3');
     
-    // Variable para controlar la pausa de 1 segundo
-    let isProcessing = false;
+    // Configuración de la cola
+    let colaDeEnvio = [];
+    let enviando = false;
+    let bloqueadoPorTiempo = false;
+    let ultimoCodigo = "";
 
+    // Función que se activa al detectar un QR
     function onScanSuccess(decodedText) {
-        // 2. Si ya estamos procesando un código, ignoramos los nuevos escaneos
-        if (isProcessing) return;
+        // Evitamos escaneos múltiples del mismo código en ráfaga (250ms)
+        if (bloqueadoPorTiempo || decodedText === ultimoCodigo) return;
 
-        isProcessing = true; // Bloqueamos nuevas lecturas
-        
-        // 3. Emitir sonido y vibración
+        // 1. Acción inmediata para el usuario
         beepSound.play();
         if (navigator.vibrate) navigator.vibrate(100);
-
         document.getElementById('last-qr').innerText = decodedText;
-        document.getElementById('status').innerText = "Enviando...";
+        
+        // 2. Agregar a la cola y marcar como bloqueado temporalmente
+        colaDeEnvio.push(decodedText);
+        bloqueadoPorTiempo = true;
+        ultimoCodigo = decodedText;
 
-        fetch(scriptURL, {
-            method: 'POST',
-            mode: 'no-cors',
-            cache: 'no-cache',
-            body: JSON.stringify({ codigo: decodedText })
-        })
-        .then(() => {
-            document.getElementById('status').innerText = "¡Guardado! Esperando...";
+        // Liberar el escáner tras un cuarto de segundo
+        setTimeout(() => { 
+            bloqueadoPorTiempo = false; 
+            ultimoCodigo = ""; // Permitimos volver a escanear el mismo si se desea
+        }, 250);
+
+        // 3. Intentar procesar la cola
+        procesarCola();
+    }
+
+    // Función "Trabajadora" (Worker) que envía datos en segundo plano
+    async function procesarCola() {
+        if (enviando || colaDeEnvio.length === 0) return;
+
+        enviando = true;
+        const codigoActual = colaDeEnvio[0];
+        document.getElementById('status').innerText = `Enviando (Q: ${colaDeEnvio.length})...`;
+
+        try {
+            await fetch(scriptURL, {
+                method: 'POST',
+                mode: 'no-cors',
+                body: JSON.stringify({ codigo: codigoActual })
+            });
             
-            // 4. Esperar 1 segundo antes de permitir la siguiente lectura
-            setTimeout(() => {
-                isProcessing = false;
-                document.getElementById('status').innerText = "Listo para escanear";
-            }, 250); 
-        })
-        .catch(err => {
-            document.getElementById('status').innerText = "Error de red";
-            isProcessing = false; // Desbloqueamos en caso de error para reintentar
-        });
+            // Si tiene éxito, lo sacamos de la cola
+            colaDeEnvio.shift();
+            document.getElementById('status').innerText = "Listo";
+        } catch (err) {
+            document.getElementById('status').innerText = "Error de red, reintentando...";
+            console.error("Error al enviar:", err);
+            // No lo sacamos de la cola para que reintente en el siguiente ciclo
+        }
+
+        enviando = false;
+        // Si todavía hay elementos, seguimos procesando
+        if (colaDeEnvio.length > 0) {
+            setTimeout(procesarCola, 100); // Pequeño respiro entre envíos
+        }
     }
 
     const html5QrCode = new Html5Qrcode("reader");
-    const config = { fps: 10, qrbox: { width: 250, height: 250 } };
-
     html5QrCode.start(
         { facingMode: "environment" }, 
-        config,
+        { fps: 15, qrbox: { width: 250, height: 250 } },
         onScanSuccess
-    ).catch(err => {
-        document.getElementById('status').innerText = "Error: " + err;
-    });
-    </script>
+    );
+</script>
+
 </body>
 </html>
+
 
 
 
