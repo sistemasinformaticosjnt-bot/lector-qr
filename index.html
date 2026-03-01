@@ -120,15 +120,43 @@
         }
 
         function iniciarEscaner() {
-            const html5QrCode = new Html5Qrcode("reader");
-            html5QrCode.start(
-                { facingMode: "environment" }, 
-                { fps: 20, qrbox: 250 },
-                onScanSuccess
-            ).catch(err => {
-                document.getElementById('status').innerText = "Error de cámara";
-            });
-        }
+    const html5QrCode = new Html5Qrcode("reader");
+    
+    // Configuración optimizada para velocidad sin bloquear el hardware
+    const qrConfig = { 
+        fps: 20, // 20 es un punto medio seguro para todos los procesadores
+        qrbox: function(viewfinderWidth, viewfinderHeight) {
+            // El cuadro de escaneo se adapta al tamaño de la pantalla
+            let minEdge = Math.min(viewfinderWidth, viewfinderHeight);
+            let fontSize = Math.floor(minEdge * 0.7);
+            return {
+                width: fontSize,
+                height: fontSize
+            };
+        },
+        aspectRatio: 1.0 // Mantenemos el aspecto cuadrado para compatibilidad total
+    };
+
+    // Intentamos abrir la cámara con una configuración flexible
+    // 'facingMode: environment' es suficiente para móviles
+    html5QrCode.start(
+        { facingMode: "environment" }, 
+        qrConfig,
+        onScanSuccess
+    ).catch(err => {
+        console.error("Error inicial, intentando fallback...", err);
+        
+        // SEGUNDO INTENTO: Si el anterior falla, intentamos sin ninguna restricción
+        html5QrCode.start(
+            { facingMode: { ideal: "environment" } }, 
+            { fps: 10 }, 
+            onScanSuccess
+        ).catch(err2 => {
+            document.getElementById('status').innerText = "Error crítico de cámara";
+            alert("No se pudo acceder a la cámara. Revisa los permisos del navegador.");
+        });
+    });
+}
     </script>
 </body>
 </html>
