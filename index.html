@@ -58,7 +58,7 @@
             setTimeout(() => {
                 isProcessing = false;
                 document.getElementById('status').innerText = "Listo para escanear";
-            }, 1000); 
+            }, 500); 
         })
         .catch(err => {
             document.getElementById('status').innerText = "Error de red";
@@ -79,4 +79,5 @@
     </script>
 </body>
 </html>
+
 
